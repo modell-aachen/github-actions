@@ -1,0 +1,115 @@
+---
+name: Skaffold build & helm deploy
+
+on:
+  workflow_call:
+    inputs:
+      registry:
+        required: true
+        type: string
+      kubernetes_api_server:
+        required: true
+        type: string
+      github_runner:
+        required: false
+        default: 'its-default-runner'
+        type: string
+      main_branch:
+        required: false
+        default: 'main'
+        type: string
+      filename:
+        required: false
+        default: 'skaffold.yaml'
+        type: string
+    secrets:
+      registry_username:
+        required: true
+      registry_password:
+        required: true
+      kubernetes_token:
+        required: true
+      kubernetes_ca:
+        required: true 
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v2
+
+      - name:  Authenticate with Docker registry
+        uses: docker/login-action@v1
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ secrets.registry_username }}
+          password: ${{ secrets.registry_password }}
+
+      - name: Install Skaffold
+        run: curl -Lo /tmp/skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64 && sudo install /tmp/skaffold /usr/local/bin/
+
+      - name: Run Skaffold build
+        run: skaffold build -f ${{ inputs.filename }} --file-output=skaffold-images.json
+
+      - name: 'Upload Skaffold images artifact'
+        uses: actions/upload-artifact@v2
+        with:
+          name: skaffold-images
+          path: skaffold-images.json
+
+  deploy:
+    name: Deploy to production
+    needs: Build
+    if: github.ref == 'refs/heads/${{ inputs.main_branch }}'
+    runs-on: ${{ inputs.github_runner }}
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v2
+
+      - name: Download Skaffold images artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: skaffold-images
+
+      - name:  Authenticate with Docker registry
+        uses: docker/login-action@v1
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ secrets.registry_username }}
+          password: ${{ secrets.registry_password }}
+
+      - name: Generate kubeconfig
+        id: kubeconfig
+        run: |
+          export KUBECONFIG=$(mktemp)
+          echo "
+          ---
+          apiVersion: v1
+          kind: Config
+          clusters:
+            - name: kube
+              cluster:
+                certificate-authority-data: ${KUBERNETES_CA}
+                server: ${KUBERNETES_API_SERVER}
+          contexts:
+            - name: kube
+              context:
+                cluster: kube
+                user: kube
+          users:
+            - name: kube
+              user:
+                token: ${KUBERNETES_TOKEN}
+          current-context: kube" > $KUBECONFIG
+          echo "::set-output name=location::${KUBECONFIG}"
+        env:
+          KUBERNETES_TOKEN: ${{ secrets.kubernetes_token }}
+          KUBERNETES_API_SERVER: ${{ inputs.kubernetes_api_server }}
+          KUBERNETES_CA: ${{ secrets.kubernetes_ca }}
+
+      - name: Run Skaffold deploy (production)
+        run: skaffold -p production deploy -f ${{ inputs.filename }} --build-artifacts=skaffold-images.json
+        env:
+          KUBECONFIG: ${{ steps.kubeconfig.outputs.location }}

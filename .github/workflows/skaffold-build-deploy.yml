@@ -62,7 +62,7 @@ jobs:
   deploy:
     name: Deploy to production
     needs: Build
-    if: github.ref == 'refs/heads/${{ inputs.main_branch }}'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/${{ inputs.main_branch }}'
     runs-on: ${{ inputs.github_runner }}
     steps:
       - name: Check out repository code

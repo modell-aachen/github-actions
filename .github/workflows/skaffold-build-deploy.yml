@@ -10,6 +10,10 @@ on:
       kubernetes_api_server:
         required: true
         type: string
+      main_branch:
+        required: false
+        default: 'main'
+        type: string
       github_runner:
         required: false
         default: 'its-default-runner'
@@ -58,7 +62,7 @@ jobs:
   deploy:
     name: Deploy to production
     needs: Build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == format('refs/heads/{0}', inputs.main_branch)
     runs-on: ${{ inputs.github_runner }}
     steps:
       - name: Check out repository code

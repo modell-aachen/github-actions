@@ -44,7 +44,9 @@ jobs:
         uses: actions/cache@v2
         with:
           path: ~/.skaffold/
-          key: fixed
+          key: cache-${{ github.run_id }} # Can use time based key as well
+          restore-keys: |
+            cache-
 
       - name:  Authenticate with Docker registry
         uses: docker/login-action@v1
